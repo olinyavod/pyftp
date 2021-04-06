@@ -1,5 +1,6 @@
 #!/usr/bin/python
 import sys
+import os
 from enum import Enum
 from ftplib import FTP
 from getpass import getpass
@@ -13,7 +14,7 @@ class ArgumentKeys(Enum):
     USER = 2
     PASSWORD = 3
     TRANSFER_FILE = 4,
-    PWD = 5
+    CWD = 5
 
 
 def print_usage() -> None:
@@ -21,7 +22,8 @@ def print_usage() -> None:
     print('\t-port\t- Set port for connection')
     print('\t-u\t\t- Set user')
     print('\t-p\t\t- Set password')
-    print('\t-f\t\t- Set path to file for transfer to ftp server')
+    print('\t-t\t\t- Set path to file for transfer to ftp server')
+    print('\t-cwd\t\t - Set base directory.')
 
 
 def parse_arguments() -> dict:
@@ -44,8 +46,8 @@ def parse_arguments() -> dict:
             arg_key = ArgumentKeys.PASSWORD
         elif arg == '-t':
             arg_key = ArgumentKeys.TRANSFER_FILE
-        elif arg == '-pwd':
-            arg_key = ArgumentKeys.PWD
+        elif arg == '-cwd':
+            arg_key = ArgumentKeys.CWD
         else:
             if arg_key == ArgumentKeys.TRANSFER_FILE:
                 args[arg_key].append(arg)
@@ -99,9 +101,9 @@ def try_connect(ftp: FTP, args: dict) -> bool:
     if not user or user.isspace():
         args[ArgumentKeys.USER] = u
 
-    pwd = args.get(ArgumentKeys.PWD)
+    pwd = args.get(ArgumentKeys.CWD)
     if not pwd or pwd.isspace():
-        args[ArgumentKeys.PWD] = p
+        args[ArgumentKeys.CWD] = p
 
     try:
         print(ftp.connect(host, int(port)))
@@ -134,7 +136,40 @@ def try_login(ftp: FTP, args: dict) -> bool:
             password = getpass("{} password: ".format(user))
 
 
+def try_transfer_file(ftp: FTP, path: str) -> bool:
+    try:
+        if os.path.isfile(path):
+            name =  os.path.basename(path)
+            print("Sending file: {}...".format(name))
+            file = open(path, 'rb')
+            ftp.storbinary("STOR {}".format(name), file)
+            file.close()
+        elif os.path.isdir(path):
+            name = os.path.basename(path)
+            print("Make directory: {}".format(name))
+            ftp.mkd(name)
+            ftp.cwd(name)
+            for f in os.listdir(path):
+                local_path = os.path.join(path, f)
+                if not try_transfer_file(ftp, local_path):
+                    return False
+            ftp.cwd('..')
+
+        return True
+    except BaseException as ex:
+        print("Transfer file {} error: {}.".format(path, ex))
+        return False
+
+
 def try_transfer_files(ftp: FTP, args: dict) -> bool:
+    files = args.get(ArgumentKeys.TRANSFER_FILE)
+    if not files:
+        return True
+
+    for f in files:
+        if not try_transfer_file(ftp, f):
+            return False
+
     return True
 
 
@@ -151,9 +186,9 @@ def main():
     if not try_transfer_files(ftp, args):
         sys.exit(1)
 
-    pwd = args.get(ArgumentKeys.PWD)
-    if pwd and not pwd.isspace():
-        ftp.pwd(pwd)
+    cwd = args.get(ArgumentKeys.CWD)
+    if cwd and not cwd.isspace():
+        ftp.cwd(cwd)
 
     ftp.quit()
 
